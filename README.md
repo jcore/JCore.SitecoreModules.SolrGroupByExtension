@@ -8,9 +8,8 @@ Example:
 <pre>
 using (var context = objIndexName.GetContext(item))
 {
-var query = GenerateQuery(searchCriteria, context, item);
-var group = query.GroupResults(context, g => g.TemplateId, numberofItemsPerGroupForRelatedWidgets);
-totalResultCount = group.TotalSearchResults;
-globalSearchResult.Add(group);
+  var query = GenerateQuery(searchCriteria, context, item);
+  var group = query.GroupResults(context, g => g.TemplateId, numberofItemsPerGroupForRelatedWidgets);
+  totalResultCount = group.TotalSearchResults;
 }
 </pre>
