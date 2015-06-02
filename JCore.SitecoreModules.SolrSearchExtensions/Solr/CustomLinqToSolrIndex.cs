@@ -38,6 +38,8 @@ namespace JCore.SitecoreModules.SolrSearchExtensions.Search.Solr
     {
         private readonly SolrSearchContext context;
         private readonly string cultureCode;
+        private IContentSearchConfigurationSettings contentSearchSettings1;
+        public FieldNameTranslator PublicFieldNameTranslator { get; set; }
 
         /// <summary>
         /// Initializes a new instance of the <see cref="CustomLinqToSolrIndex{TItem}"/> class.
@@ -49,10 +51,12 @@ namespace JCore.SitecoreModules.SolrSearchExtensions.Search.Solr
         {
             Assert.ArgumentNotNull((object)context, "context");
             this.context = context;
+            this.contentSearchSettings1 = context.Index.Locator.GetInstance<IContentSearchConfigurationSettings>();
             CultureExecutionContext executionContext1 = this.Parameters.ExecutionContext as CultureExecutionContext;
             CultureInfo culture = executionContext1 == null ? CultureInfo.GetCultureInfo(Settings.DefaultLanguage) : executionContext1.Culture;
             this.cultureCode = culture.TwoLetterISOLanguageName;
             ((SolrFieldNameTranslator)this.Parameters.FieldNameTranslator).AddCultureContext(culture);
+            this.PublicFieldNameTranslator = this.FieldNameTranslator;
         }
 
         /// <summary>
@@ -65,8 +69,8 @@ namespace JCore.SitecoreModules.SolrSearchExtensions.Search.Solr
         {
             if (typeof(TResult).IsGenericType && typeof(TResult).GetGenericTypeDefinition() == typeof(ExtendedSearchResults<>))
             {
-                
-                Type resultType = typeof(TResult).GetGenericArguments()[0];        
+
+                Type resultType = typeof(TResult).GetGenericArguments()[0];
                 SolrQueryResults<Dictionary<string, object>> solrQueryResults = this.Execute(compositeQuery, resultType);
                 Type type = typeof(SolrSearchResults<>).MakeGenericType(new Type[1]
                     {
@@ -74,11 +78,12 @@ namespace JCore.SitecoreModules.SolrSearchExtensions.Search.Solr
                     });
                 MethodInfo methodInfo = this.GetType().GetMethod("GetExtendedResults", BindingFlags.Instance | BindingFlags.NonPublic).MakeGenericMethod(typeof(TResult), resultType);
                 SelectMethod selectMethod = CustomLinqToSolrIndex<TItem>.GetSelectMethod(compositeQuery);
-                object instance = Activator.CreateInstance(type, new object[4]
+                object instance = Activator.CreateInstance(type, new object[5]
                 {
                   (object) this.context,
                   (object) solrQueryResults,
                   (object) selectMethod,
+                  (IEnumerable<IExecutionContext>) compositeQuery.ExecutionContexts,
                   (object) compositeQuery.VirtualFieldProcessors
                 });
                 return (TResult)methodInfo.Invoke(this, new object[] { compositeQuery, instance, solrQueryResults });
@@ -100,11 +105,12 @@ namespace JCore.SitecoreModules.SolrSearchExtensions.Search.Solr
         /// <returns></returns>
         internal TResult GetExtendedResults<TResult, TDocument>(ExtendedCompositeQuery compositeQuery, SolrSearchResults<TDocument> processedResults, SolrQueryResults<Dictionary<string, object>> results)
         {
-            object obj = default(TResult); 
-                IEnumerable<Linq.GroupedResults<TDocument>> groups = processedResults.GetGroupedResults();
-                FacetResults facetResults = this.FormatFacetResults(processedResults.GetFacets(), compositeQuery.FacetQueries);
-                obj = Activator.CreateInstance(typeof(TResult), (object)groups, (object)processedResults.NumberFound, (object)facetResults);
-
+            object obj = default(TResult);
+            IEnumerable<Linq.GroupedResults<TDocument>> groups = processedResults.GetGroupedResults();
+            FacetResults facetResults = this.FormatFacetResults(processedResults.GetFacets(), compositeQuery.FacetQueries);
+            IEnumerable<SearchHit<TDocument>> searchResults = processedResults.GetSearchHits();
+            var spellcheckedResponse = processedResults.GetSpellCheckedResults();
+            obj = Activator.CreateInstance(typeof(TResult), (object)searchResults, (object)groups, (object)processedResults.NumberFound, spellcheckedResponse, processedResults.Highlights, (object)facetResults);
             return (TResult)Convert.ChangeType(obj, typeof(TResult));
         }
 
@@ -216,16 +222,50 @@ namespace JCore.SitecoreModules.SolrSearchExtensions.Search.Solr
                     if (!Enumerable.Any<GetResultsMethod>((IEnumerable<GetResultsMethod>)list2))
                         options.Rows = new int?(0);
                 }
+
+                //List<GroupByMethod> list9 = Enumerable.ToList<GroupByMethod>(Enumerable.Select<QueryMethod, GroupByMethod>(compositeQuery.Methods.Where(m => m.GetType() == typeof(GroupByMethod)), (Func<QueryMethod, GroupByMethod>)(m => (GroupByMethod)m)));
+                //if (list9.Any())
+                //{
+                //    foreach (GroupByMethod groupByMethod in list9)
+                //    {
+                //        options.Grouping = new GroupingParameters()
+                //        {
+                //            Fields = new[] { groupByMethod.Field },
+                //            Format = GroupingFormat.Grouped,
+                //            Limit = 20,
+                //        };
+                //    }
+                //    if (options.Fields.Count > 0)
+                //    {
+                //        options.Fields.Add("score");
+                //    }
+                //    else
+                //    {
+                //        options.Fields.Add("*");
+                //        options.Fields.Add("score");
+                //    }
+                //}
+                //List<CheckSpellingMethod> list10 = Enumerable.ToList<CheckSpellingMethod>(Enumerable.Select<QueryMethod, CheckSpellingMethod>(compositeQuery.Methods.Where(m => m.GetType() == typeof(CheckSpellingMethod)), (Func<QueryMethod, CheckSpellingMethod>)(m => (CheckSpellingMethod)m)));
+                //if (list10.Any())
+                //{
+                //    foreach (CheckSpellingMethod groupByMethod in list10)
+                //    {
+                //        options.SpellCheck = new SpellCheckingParameters()
+                //        {
+                //            Collate = true
+                //        };
+                //    }
+                //}
             }
             if (compositeQuery.Filter != null)
                 options.AddFilterQueries(new ISolrQuery[1]
-        {
-          (ISolrQuery) compositeQuery.Filter
-        });
+                {
+                  (ISolrQuery) compositeQuery.Filter
+                });
             options.AddFilterQueries(new ISolrQuery[1]
-      {
-        (ISolrQuery) new SolrQueryByField("_indexname", this.context.Index.Name)
-      });
+                  {
+                    (ISolrQuery) new SolrQueryByField("_indexname", this.context.Index.Name)
+                  });
             if (!Settings.DefaultLanguage.StartsWith(this.cultureCode))
             {
                 QueryOptions queryOptions = options;
@@ -239,14 +279,21 @@ namespace JCore.SitecoreModules.SolrSearchExtensions.Search.Solr
             }
             SolrLoggingSerializer loggingSerializer = new SolrLoggingSerializer();
             string q = loggingSerializer.SerializeQuery((ISolrQuery)compositeQuery.Query);
+
             SolrSearchIndex solrSearchIndex = this.context.Index as SolrSearchIndex;
             try
             {
                 if (!options.Rows.HasValue)
-                    options.Rows = new int?(ContentSearchConfigurationSettings.SearchMaxResults);
+                    options.Rows = new int?(this.contentSearchSettings1.SearchMaxResults());
                 SearchLog.Log.Info("Query - " + q, (Exception)null);
-                SearchLog.Log.Info("Serialized Query - ?q=" + q + "&" + string.Join("&", Enumerable.ToArray<string>(Enumerable.Select<KeyValuePair<string, string>, string>(loggingSerializer.GetAllParameters(options), (Func<KeyValuePair<string, string>, string>)(p => string.Format("{0}={1}", (object)p.Key, (object)p.Value))))), (Exception)null);
                 var solrOperations = ServiceLocator.Current.GetInstance<ISolrOperations<Dictionary<string, object>>>(solrSearchIndex.Core);
+
+                if (compositeQuery.LocalParams != null)
+                {
+                    SearchLog.Log.Info("Serialized Query - ?q=" + compositeQuery.LocalParams.ToString() + q + "&" + string.Join("&", Enumerable.ToArray<string>(Enumerable.Select<KeyValuePair<string, string>, string>(loggingSerializer.GetAllParameters(options), (Func<KeyValuePair<string, string>, string>)(p => string.Format("{0}={1}", (object)p.Key, (object)p.Value))))), (Exception)null);
+                    return solrOperations.Query(compositeQuery.LocalParams + q, options);
+                }
+                SearchLog.Log.Info("Serialized Query - ?q=" + q + "&" + string.Join("&", Enumerable.ToArray<string>(Enumerable.Select<KeyValuePair<string, string>, string>(loggingSerializer.GetAllParameters(options), (Func<KeyValuePair<string, string>, string>)(p => string.Format("{0}={1}", (object)p.Key, (object)p.Value))))), (Exception)null);
                 return solrOperations.Query(q, options);
             }
             catch (Exception ex)

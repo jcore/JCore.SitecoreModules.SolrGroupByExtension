@@ -31,25 +31,25 @@
   </PropertyGroup>
   <ItemGroup>
     <Reference Include="Microsoft.Practices.ServiceLocation">
-      <HintPath>..\..\..\Downloads\Sitecore7\Sitecore.Solr.Support 1.0.0 rev. 130918\bin\Microsoft.Practices.ServiceLocation.dll</HintPath>
+      <HintPath>..\..\aacn\References\Sitecore\Microsoft.Practices.ServiceLocation.dll</HintPath>
     </Reference>
     <Reference Include="Sitecore.ContentSearch">
-      <HintPath>..\..\..\Downloads\Sitecore7\Sitecore 7.0 rev. 130918\Sitecore 7.0 rev. 130918\Website\bin\Sitecore.ContentSearch.dll</HintPath>
+      <HintPath>..\..\aacn\References\Sitecore\Sitecore.ContentSearch.dll</HintPath>
     </Reference>
     <Reference Include="Sitecore.ContentSearch.Linq">
-      <HintPath>..\..\..\Downloads\Sitecore7\Sitecore 7.0 rev. 130918\Sitecore 7.0 rev. 130918\Website\bin\Sitecore.ContentSearch.Linq.dll</HintPath>
+      <HintPath>..\..\aacn\References\Sitecore\Sitecore.ContentSearch.Linq.dll</HintPath>
     </Reference>
     <Reference Include="Sitecore.ContentSearch.Linq.Solr">
-      <HintPath>..\..\..\Downloads\Sitecore7\Sitecore.Solr.Support 1.0.0 rev. 130918\bin\Sitecore.ContentSearch.Linq.Solr.dll</HintPath>
+      <HintPath>..\..\aacn\References\Sitecore\Sitecore.ContentSearch.Linq.Solr.dll</HintPath>
     </Reference>
     <Reference Include="Sitecore.ContentSearch.SolrProvider">
-      <HintPath>..\..\..\Downloads\Sitecore7\Sitecore.Solr.Support 1.0.0 rev. 130918\bin\Sitecore.ContentSearch.SolrProvider.dll</HintPath>
+      <HintPath>..\..\aacn\References\Sitecore\Sitecore.ContentSearch.SolrProvider.dll</HintPath>
     </Reference>
     <Reference Include="Sitecore.Kernel">
-      <HintPath>..\..\..\Downloads\Sitecore7\Sitecore 7.0 rev. 130918\Sitecore 7.0 rev. 130918\Website\bin\Sitecore.Kernel.dll</HintPath>
+      <HintPath>..\..\aacn\References\Sitecore\Sitecore.Kernel.dll</HintPath>
     </Reference>
     <Reference Include="SolrNet">
-      <HintPath>..\..\..\Downloads\Sitecore7\Sitecore.Solr.Support 1.0.0 rev. 130918\bin\SolrNet.dll</HintPath>
+      <HintPath>..\..\aacn\References\Sitecore\SolrNet.dll</HintPath>
     </Reference>
     <Reference Include="System" />
     <Reference Include="System.Configuration" />

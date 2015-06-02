@@ -13,6 +13,8 @@ using Sitecore.ContentSearch.SolrProvider;
 using JCore.SitecoreModules.SolrSearchExtensions.Search.Solr.Linq;
 using SolrNet;
 using System.Text.RegularExpressions;
+using SolrNet.Impl;
+using Sitecore.ContentSearch.Abstractions;
 
 namespace JCore.SitecoreModules.SolrSearchExtensions.Search.Solr
 {
@@ -27,6 +29,8 @@ namespace JCore.SitecoreModules.SolrSearchExtensions.Search.Solr
         private readonly IEnumerable<IFieldQueryTranslator> virtualFieldProcessors;
         private readonly int numberFound;
         private readonly string spellCheckerResults;
+        private readonly IDictionary<string, HighlightedSnippets> highlights;
+        private readonly IEnumerable<IExecutionContext> executionContexts;
 
         public int NumberFound
         {
@@ -36,24 +40,22 @@ namespace JCore.SitecoreModules.SolrSearchExtensions.Search.Solr
             }
         }
 
-        /// <summary>
-        /// Initializes a new instance of the <see cref="SolrSearchResults{TElement}"/> struct.
-        /// </summary>
-        /// <param name="context">The context.</param>
-        /// <param name="searchResults">The search results.</param>
-        /// <param name="selectMethod">The select method.</param>
-        /// <param name="virtualFieldProcessors">The virtual field processors.</param>
-        public SolrSearchResults(SolrSearchContext context, SolrQueryResults<Dictionary<string, object>> searchResults, SelectMethod selectMethod, IEnumerable<IFieldQueryTranslator> virtualFieldProcessors)
+        public SolrSearchResults(SolrSearchContext context, SolrQueryResults<Dictionary<string, object>> searchResults, SelectMethod selectMethod, IEnumerable<IExecutionContext> executionContexts, IEnumerable<IFieldQueryTranslator> virtualFieldProcessors)
         {
             this.context = context;
             this.solrIndexConfiguration = (SolrIndexConfiguration)this.context.Index.Configuration;
-            this.mapper = this.solrIndexConfiguration.IndexDocumentPropertyMapper;
+            this.executionContexts = executionContexts;
+
+            OverrideExecutionContext<IIndexDocumentPropertyMapper<Dictionary<string, object>>> executionContext = this.executionContexts != null ? Enumerable.FirstOrDefault<IExecutionContext>(this.executionContexts, (Func<IExecutionContext, bool>)(c => c is OverrideExecutionContext<IIndexDocumentPropertyMapper<Dictionary<string, object>>>)) as OverrideExecutionContext<IIndexDocumentPropertyMapper<Dictionary<string, object>>> : (OverrideExecutionContext<IIndexDocumentPropertyMapper<Dictionary<string, object>>>)null;
+            this.mapper = (executionContext != null ? executionContext.OverrideObject : (IIndexDocumentPropertyMapper<Dictionary<string, object>>)null) ?? this.solrIndexConfiguration.IndexDocumentPropertyMapper;
+
             this.selectMethod = selectMethod;
             this.virtualFieldProcessors = virtualFieldProcessors;
             this.numberFound = searchResults.NumFound;
-            this.searchResults = SolrSearchResults<TElement>.ApplySecurity(searchResults, context.SecurityOptions, ref this.numberFound);
-            this.groupedSearchResults = SolrSearchResults<TElement>.ApplyGroupSecurity(this.searchResults.Grouping, context.SecurityOptions, ref this.numberFound);
-            this.spellCheckerResults = SolrSearchResults<TElement>.GetSpellCheckedString(searchResults.SpellChecking.Collation);
+            this.searchResults = SolrSearchResults<TElement>.ApplySecurity(searchResults, context.SecurityOptions, context.Index.Locator.GetInstance<ICorePipeline>(), context.Index.Locator.GetInstance<IAccessRight>(), ref this.numberFound);
+            this.groupedSearchResults = SolrSearchResults<TElement>.ApplyGroupSecurity(this.searchResults.Grouping, context.SecurityOptions, context.Index.Locator.GetInstance<ICorePipeline>(), context.Index.Locator.GetInstance<IAccessRight>(), ref this.numberFound);
+            this.spellCheckerResults = SolrSearchResults<TElement>.GetSpellCheckedString(searchResults.SpellChecking);
+            this.highlights = searchResults.Highlights;
         }
 
         /// <summary>
@@ -61,28 +63,16 @@ namespace JCore.SitecoreModules.SolrSearchExtensions.Search.Solr
         /// </summary>
         /// <param name="collection">The collection.</param>
         /// <returns></returns>
-        private static string GetSpellCheckedString(string collection)
+        private static string GetSpellCheckedString(SpellCheckResults results)
         {
-            if (!string.IsNullOrEmpty(collection))
+            if (!string.IsNullOrEmpty(results.Collation) && results.Count > 0 && results.FirstOrDefault(r => r.Suggestions.Any() && r.Suggestions.Any(s => s != "true")) != null)
             {
-                var regex = new Regex(@":[(""](.*)[^*"")]", RegexOptions.IgnoreCase | RegexOptions.CultureInvariant);
-                var match = regex.Match(collection);
-                if (match.Success && match.Groups.Count >= 2 && match.Groups[1] != null)
-                {
-                    return match.Groups[1].Value;
-                }
+                return results.Collation;
             }
             return string.Empty;
         }
 
-        /// <summary>
-        /// Applies the group security.
-        /// </summary>
-        /// <param name="solrQueryResults">The solr query results.</param>
-        /// <param name="options">The options.</param>
-        /// <param name="numberFound">The number found.</param>
-        /// <returns></returns>
-        private static IDictionary<string, SolrNet.GroupedResults<Dictionary<string, object>>> ApplyGroupSecurity(IDictionary<string, SolrNet.GroupedResults<Dictionary<string, object>>> solrQueryResults, SearchSecurityOptions options, ref int numberFound)
+        private static IDictionary<string, SolrNet.GroupedResults<Dictionary<string, object>>> ApplyGroupSecurity(IDictionary<string, SolrNet.GroupedResults<Dictionary<string, object>>> solrQueryResults, SearchSecurityOptions options, ICorePipeline pipeline, IAccessRight accessRight, ref int numberFound)
         {
             if (!options.HasFlag((Enum)SearchSecurityOptions.DisableSecurityCheck))
             {
@@ -101,7 +91,7 @@ namespace JCore.SitecoreModules.SolrSearchExtensions.Search.Solr
                             {
                                 object obj2;
                                 dictionary.TryGetValue("_datasource", out obj2);
-                                if (OutboundIndexFilterPipeline.CheckItemSecurity(new OutboundIndexFilterArgs((string)obj1, (string)obj2)))
+                                if (OutboundIndexFilterPipeline.CheckItemSecurity(pipeline, accessRight, new OutboundIndexFilterArgs((string)obj1, (string)obj2)))
                                 {
                                     hashSet.Add(dictionary);
                                     numberFound = numberFound - 1;
@@ -118,14 +108,7 @@ namespace JCore.SitecoreModules.SolrSearchExtensions.Search.Solr
             return solrQueryResults;
         }
 
-        /// <summary>
-        /// Applies the security.
-        /// </summary>
-        /// <param name="solrQueryResults">The solr query results.</param>
-        /// <param name="options">The options.</param>
-        /// <param name="numberFound">The number found.</param>
-        /// <returns></returns>
-        private static SolrQueryResults<Dictionary<string, object>> ApplySecurity(SolrQueryResults<Dictionary<string, object>> solrQueryResults, SearchSecurityOptions options, ref int numberFound)
+        private static SolrQueryResults<Dictionary<string, object>> ApplySecurity(SolrQueryResults<Dictionary<string, object>> solrQueryResults, SearchSecurityOptions options, ICorePipeline pipeline, IAccessRight accessRight, ref int numberFound)
         {
             if (!options.HasFlag((Enum)SearchSecurityOptions.DisableSecurityCheck))
             {
@@ -137,7 +120,7 @@ namespace JCore.SitecoreModules.SolrSearchExtensions.Search.Solr
                     {
                         object obj2;
                         dictionary.TryGetValue("_datasource", out obj2);
-                        if (OutboundIndexFilterPipeline.CheckItemSecurity(new OutboundIndexFilterArgs((string)obj1, (string)obj2)))
+                        if (OutboundIndexFilterPipeline.CheckItemSecurity(pipeline, accessRight, new OutboundIndexFilterArgs((string)obj1, (string)obj2)))
                         {
                             hashSet.Add(dictionary);
                             numberFound = numberFound - 1;
@@ -151,12 +134,6 @@ namespace JCore.SitecoreModules.SolrSearchExtensions.Search.Solr
         }
 
 
-        /// <summary>
-        /// Elements at.
-        /// </summary>
-        /// <param name="index">The index.</param>
-        /// <returns></returns>
-        /// <exception cref="System.IndexOutOfRangeException"></exception>
         public TElement ElementAt(int index)
         {
             if (index < 0 || index > this.searchResults.Count)
@@ -165,11 +142,6 @@ namespace JCore.SitecoreModules.SolrSearchExtensions.Search.Solr
                 return this.mapper.MapToType<TElement>(this.searchResults[index], this.selectMethod, this.virtualFieldProcessors, this.context.SecurityOptions);
         }
 
-        /// <summary>
-        /// Elements at or default.
-        /// </summary>
-        /// <param name="index">The index.</param>
-        /// <returns></returns>
         public TElement ElementAtOrDefault(int index)
         {
             if (index < 0 || index > this.searchResults.Count)
@@ -178,29 +150,16 @@ namespace JCore.SitecoreModules.SolrSearchExtensions.Search.Solr
                 return this.mapper.MapToType<TElement>(this.searchResults[index], this.selectMethod, this.virtualFieldProcessors, this.context.SecurityOptions);
         }
 
-        /// <summary>
-        /// Anies this instance.
-        /// </summary>
-        /// <returns></returns>
         public bool Any()
         {
             return this.numberFound > 0;
         }
 
-        /// <summary>
-        /// Counts this instance.
-        /// </summary>
-        /// <returns></returns>
         public long Count()
         {
             return (long)this.numberFound;
         }
 
-        /// <summary>
-        /// Firsts this instance.
-        /// </summary>
-        /// <returns></returns>
-        /// <exception cref="System.InvalidOperationException">Sequence contains no elements</exception>
         public TElement First()
         {
             if (this.searchResults.Count < 1)
@@ -209,10 +168,6 @@ namespace JCore.SitecoreModules.SolrSearchExtensions.Search.Solr
                 return this.ElementAt(0);
         }
 
-        /// <summary>
-        /// Firsts the or default.
-        /// </summary>
-        /// <returns></returns>
         public TElement FirstOrDefault()
         {
             if (this.searchResults.Count < 1)
@@ -221,11 +176,6 @@ namespace JCore.SitecoreModules.SolrSearchExtensions.Search.Solr
                 return this.ElementAt(0);
         }
 
-        /// <summary>
-        /// Lasts this instance.
-        /// </summary>
-        /// <returns></returns>
-        /// <exception cref="System.InvalidOperationException">Sequence contains no elements</exception>
         public TElement Last()
         {
             if (this.searchResults.Count < 1)
@@ -234,10 +184,6 @@ namespace JCore.SitecoreModules.SolrSearchExtensions.Search.Solr
                 return this.ElementAt(this.searchResults.Count - 1);
         }
 
-        /// <summary>
-        /// Lasts the or default.
-        /// </summary>
-        /// <returns></returns>
         public TElement LastOrDefault()
         {
             if (this.searchResults.Count < 1)
@@ -246,15 +192,6 @@ namespace JCore.SitecoreModules.SolrSearchExtensions.Search.Solr
                 return this.ElementAt(this.searchResults.Count - 1);
         }
 
-        /// <summary>
-        /// Singles this instance.
-        /// </summary>
-        /// <returns></returns>
-        /// <exception cref="System.InvalidOperationException">
-        /// Sequence contains no elements
-        /// or
-        /// Sequence contains more than one element
-        /// </exception>
         public TElement Single()
         {
             if (this.Count() < 1L)
@@ -265,10 +202,6 @@ namespace JCore.SitecoreModules.SolrSearchExtensions.Search.Solr
                 return this.mapper.MapToType<TElement>(this.searchResults[0], this.selectMethod, this.virtualFieldProcessors, this.context.SecurityOptions);
         }
 
-        /// <summary>
-        /// Singles the or default.
-        /// </summary>
-        /// <returns></returns>
         public TElement SingleOrDefault()
         {
             if (this.Count() != 1L)
@@ -277,10 +210,6 @@ namespace JCore.SitecoreModules.SolrSearchExtensions.Search.Solr
                 return this.mapper.MapToType<TElement>(this.searchResults[0], this.selectMethod, this.virtualFieldProcessors, this.context.SecurityOptions);
         }
 
-        /// <summary>
-        /// Gets the search hits.
-        /// </summary>
-        /// <returns></returns>
         public IEnumerable<SearchHit<TElement>> GetSearchHits()
         {
             foreach (Dictionary<string, object> document in (List<Dictionary<string, object>>)this.searchResults)
@@ -293,37 +222,31 @@ namespace JCore.SitecoreModules.SolrSearchExtensions.Search.Solr
             }
         }
 
-        /// <summary>
-        /// Gets the search results.
-        /// </summary>
-        /// <returns></returns>
         public IEnumerable<TElement> GetSearchResults()
         {
             foreach (Dictionary<string, object> document in (List<Dictionary<string, object>>)this.searchResults)
                 yield return this.mapper.MapToType<TElement>(document, this.selectMethod, this.virtualFieldProcessors, this.context.SecurityOptions);
         }
 
-        /// <summary>
-        /// Gets the facets.
-        /// </summary>
-        /// <returns></returns>
         public Dictionary<string, ICollection<KeyValuePair<string, int>>> GetFacets()
         {
             IDictionary<string, ICollection<KeyValuePair<string, int>>> facetFields = this.searchResults.FacetFields;
             IDictionary<string, IList<Pivot>> facetPivots = this.searchResults.FacetPivots;
             Dictionary<string, ICollection<KeyValuePair<string, int>>> dictionary = Enumerable.ToDictionary<KeyValuePair<string, ICollection<KeyValuePair<string, int>>>, string, ICollection<KeyValuePair<string, int>>>((IEnumerable<KeyValuePair<string, ICollection<KeyValuePair<string, int>>>>)facetFields, (Func<KeyValuePair<string, ICollection<KeyValuePair<string, int>>>, string>)(x => x.Key), (Func<KeyValuePair<string, ICollection<KeyValuePair<string, int>>>, ICollection<KeyValuePair<string, int>>>)(x => x.Value));
-            if (facetPivots.Count > 0)
+            if (facetPivots.Any())
             {
                 foreach (KeyValuePair<string, IList<Pivot>> keyValuePair in (IEnumerable<KeyValuePair<string, IList<Pivot>>>)facetPivots)
                     dictionary[keyValuePair.Key] = this.Flatten((IEnumerable<Pivot>)keyValuePair.Value, string.Empty);
             }
+            IDictionary<string, DateFacetingResult> facetDates = this.searchResults.FacetDates;
+            if (facetDates.Any())
+            {
+                foreach (KeyValuePair<string, DateFacetingResult> keyValuePair in (IEnumerable<KeyValuePair<string, DateFacetingResult>>)facetDates)
+                    dictionary[keyValuePair.Key] = this.Flatten((DateFacetingResult)keyValuePair.Value);
+            }
             return dictionary;
         }
 
-        /// <summary>
-        /// Gets the grouped results.
-        /// </summary>
-        /// <returns></returns>
         public IEnumerable<JCore.SitecoreModules.SolrSearchExtensions.Search.Solr.Linq.GroupedResults<TElement>> GetGroupedResults()
         {
             var groupedResults = new List<JCore.SitecoreModules.SolrSearchExtensions.Search.Solr.Linq.GroupedResults<TElement>>();
@@ -334,11 +257,6 @@ namespace JCore.SitecoreModules.SolrSearchExtensions.Search.Solr
             return groupedResults;
         }
 
-        /// <summary>
-        /// Processes the group result.
-        /// </summary>
-        /// <param name="group">The group.</param>
-        /// <returns></returns>
         private Linq.GroupedResults<TElement> ProcessGroupResult(SolrNet.GroupedResults<Dictionary<string, object>> group)
         {
             var result = new Linq.GroupedResults<TElement>()
@@ -350,11 +268,6 @@ namespace JCore.SitecoreModules.SolrSearchExtensions.Search.Solr
             return result;
         }
 
-        /// <summary>
-        /// Processes the groups.
-        /// </summary>
-        /// <param name="collection">The collection.</param>
-        /// <returns></returns>
         private IEnumerable<Linq.Group<TElement>> ProcessGroups(ICollection<SolrNet.Group<Dictionary<string, object>>> collection)
         {
             foreach (var group in collection)
@@ -363,11 +276,6 @@ namespace JCore.SitecoreModules.SolrSearchExtensions.Search.Solr
             }
         }
 
-        /// <summary>
-        /// Processes the group.
-        /// </summary>
-        /// <param name="group">The group.</param>
-        /// <returns></returns>
         private Linq.Group<TElement> ProcessGroup(SolrNet.Group<Dictionary<string, object>> group)
         {
             var groupResult = new Linq.Group<TElement>()
@@ -379,11 +287,6 @@ namespace JCore.SitecoreModules.SolrSearchExtensions.Search.Solr
             return groupResult;
         }
 
-        /// <summary>
-        /// Processes the documents.
-        /// </summary>
-        /// <param name="collection">The collection.</param>
-        /// <returns></returns>
         private IEnumerable<TElement> ProcessDocuments(ICollection<Dictionary<string, object>> collection)
         {
             foreach (var document in collection)
@@ -392,12 +295,6 @@ namespace JCore.SitecoreModules.SolrSearchExtensions.Search.Solr
             }
         }
 
-        /// <summary>
-        /// Flattens the specified pivots.
-        /// </summary>
-        /// <param name="pivots">The pivots.</param>
-        /// <param name="parentName">Name of the parent.</param>
-        /// <returns></returns>
         private ICollection<KeyValuePair<string, int>> Flatten(IEnumerable<Pivot> pivots, string parentName)
         {
             HashSet<KeyValuePair<string, int>> hashSet = new HashSet<KeyValuePair<string, int>>();
@@ -411,13 +308,33 @@ namespace JCore.SitecoreModules.SolrSearchExtensions.Search.Solr
             return (ICollection<KeyValuePair<string, int>>)hashSet;
         }
 
-        /// <summary>
-        /// Gets the spell checked results.
-        /// </summary>
-        /// <returns></returns>
+        private ICollection<KeyValuePair<string, int>> Flatten(DateFacetingResult dates)
+        {
+            HashSet<KeyValuePair<string, int>> hashSet = new HashSet<KeyValuePair<string, int>>();
+            foreach (var dateResult in dates.DateResults.OrderByDescending(d => d.Key))
+            {
+                hashSet.Add(new KeyValuePair<string, int>(dateResult.Key.ToString("MMMM, yyyy"), dateResult.Value));
+            }
+            return (ICollection<KeyValuePair<string, int>>)hashSet;
+        }
+
         public string GetSpellCheckedResults()
         {
             return this.spellCheckerResults;
+        }
+
+        /// <summary>
+        /// Gets the highlights.
+        /// </summary>
+        /// <value>
+        /// The highlights.
+        /// </value>
+        public IDictionary<string, HighlightedSnippets> Highlights
+        {
+            get
+            {
+                return this.highlights;
+            }
         }
 
     }

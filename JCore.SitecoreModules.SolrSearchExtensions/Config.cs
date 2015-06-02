@@ -24,5 +24,53 @@ namespace JCore.SitecoreModules.SolrSearchExtensions
             }
         }
 
+        public static int SolrHighlightsNumberOfSnippets
+        {
+            get
+            {
+                return Settings.GetIntSetting("SolrHighlightsNumberOfSnippets", 5);
+            }
+        }
+
+        public static string[] SolrHighlightsFields
+        {
+            get
+            {
+                var fields = Settings.GetSetting("SolrHighlightsFields","_content");
+                return fields.Split(',');
+            }
+        }
+
+        public static string SolrHighlightsRegexPattern
+        {
+            get
+            {
+                return Settings.GetSetting("SolrHighlightsRegexPattern", @"\w[^|;.!?]{50,400}[|;.!?]");
+            }
+        }
+
+        public static int SolrHighlightsFragsize
+        {
+            get
+            {
+                return Settings.GetIntSetting("SolrHighlightsFragsize", 300);
+            }
+        }
+
+        public static double SolrHighlightsRegexSlop
+        {
+            get
+            {
+                return Settings.GetDoubleSetting("SolrHighlightsRegexSlop", 0.2);
+            }
+        }
+
+        public static string DateField
+        {
+            get
+            {
+                return Settings.GetSetting("SolrDateField", "date_tdt");
+            }
+        }
     }
 }

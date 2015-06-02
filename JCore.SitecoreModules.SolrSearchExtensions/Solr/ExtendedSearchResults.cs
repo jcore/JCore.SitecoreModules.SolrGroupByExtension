@@ -5,25 +5,20 @@ using System.Text;
 using System.Threading.Tasks;
 using Sitecore.ContentSearch.Linq;
 using SolrNet;
+using SolrNet.Impl;
 
 namespace JCore.SitecoreModules.SolrSearchExtensions.Search.Solr
 {
     public class ExtendedSearchResults<TSource>
     {
-        public string SpellCheckedResponse { get; set; }
+        public string CorrectedSpelling { get; set; }
         public IDictionary<string, IList<TSource>> SimilarResults { get; set; }
         public int TotalSearchResults { get; private set; }
         public IEnumerable<SearchHit<TSource>> Hits { get; private set; }
         public IEnumerable<Linq.GroupedResults<TSource>> Groups { get; private set; }
         public FacetResults Facets { get; private set; }
+        public IDictionary<string, HighlightedSnippets> Highlights { get; private set; }
 
-
-        /// <summary>
-        /// Initializes a new instance of the <see cref="ExtendedSearchResults{TSource}"/> class.
-        /// </summary>
-        /// <param name="results">The results.</param>
-        /// <param name="totalSearchResults">The total search results.</param>
-        /// <exception cref="System.ArgumentNullException">results</exception>
         public ExtendedSearchResults(IEnumerable<SearchHit<TSource>> results, int totalSearchResults)
         {
             if (results == null)
@@ -32,36 +27,35 @@ namespace JCore.SitecoreModules.SolrSearchExtensions.Search.Solr
             this.TotalSearchResults = totalSearchResults;
         }
 
-        /// <summary>
-        /// Initializes a new instance of the <see cref="ExtendedSearchResults{TSource}"/> class.
-        /// </summary>
-        /// <param name="results">The results.</param>
-        /// <param name="totalSearchResults">The total search results.</param>
-        /// <param name="facets">The facets.</param>
         public ExtendedSearchResults(IEnumerable<SearchHit<TSource>> results, int totalSearchResults, FacetResults facets = null)
             : this(results, totalSearchResults)
         {
             this.Facets = facets;
         }
 
-        /// <summary>
-        /// Initializes a new instance of the <see cref="ExtendedSearchResults{TSource}"/> class.
-        /// </summary>
-        /// <param name="results">The results.</param>
-        /// <param name="totalSearchResults">The total search results.</param>
-        /// <param name="facets">The facets.</param>
         public ExtendedSearchResults(IEnumerable<Linq.GroupedResults<TSource>> results, int totalSearchResults, FacetResults facets = null)
             : this(results, totalSearchResults)
         {
             this.Facets = facets;
         }
 
-        /// <summary>
-        /// Initializes a new instance of the <see cref="ExtendedSearchResults{TSource}"/> class.
-        /// </summary>
-        /// <param name="results">The results.</param>
-        /// <param name="totalSearchResults">The total search results.</param>
-        /// <exception cref="System.ArgumentNullException">results</exception>
+        public ExtendedSearchResults(IEnumerable<SearchHit<TSource>> results, IEnumerable<Linq.GroupedResults<TSource>> groups, int totalSearchResults, string spellcheckedString, FacetResults facets = null)
+            : this(results, totalSearchResults)
+        {
+            this.Facets = facets;
+            this.Groups = groups;
+            this.CorrectedSpelling = spellcheckedString;
+        }
+
+        public ExtendedSearchResults(IEnumerable<SearchHit<TSource>> results, IEnumerable<Linq.GroupedResults<TSource>> groups, int totalSearchResults, string spellcheckedString, IDictionary<string, HighlightedSnippets> highlights, FacetResults facets = null)
+            : this(results, totalSearchResults)
+        {
+            this.Facets = facets;
+            this.Groups = groups;
+            this.CorrectedSpelling = spellcheckedString;
+            this.Highlights = highlights;
+        }
+
         public ExtendedSearchResults(IEnumerable<Linq.GroupedResults<TSource>> results, int totalSearchResults)
         {
             if (results == null)
