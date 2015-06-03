@@ -40,28 +40,8 @@ namespace JCore.SitecoreModules.SolrSearchExtensions.Search.Solr
                 throw new ArgumentNullException("source");
 
             var linqToSolr = new CustomLinqToSolrIndex<TSource>((SolrSearchContext)context, (IExecutionContext)null);
-
-            var param = "_template";
-            MemberExpression member = keySelector.Body as MemberExpression;
-            if (member != null)
-            {
-                PropertyInfo propInfo = member.Member as PropertyInfo;
-                if (propInfo != null)
-                {
-                    var expressionParser = new ExpressionParser(typeof(TKey), typeof(TSource), linqToSolr.PublicFieldNameTranslator);
-                    var methodInfo = expressionParser.GetType().GetMethod("Visit", BindingFlags.Instance | BindingFlags.NonPublic, Type.DefaultBinder, new Type[] { typeof(Expression) }, null);
-                    if (methodInfo != null)
-                    {
-                        object classInstance = Activator.CreateInstance(typeof(TSource), null);
-                        QueryNode queryNode = methodInfo.Invoke(expressionParser, new object[] { keySelector.Body }) as QueryNode;
-                        FieldNode fieldNode = queryNode as FieldNode;
-                        if (fieldNode != null)
-                        {
-                            param = fieldNode.FieldKey;
-                        }
-                    }
-                }
-            }
+            MemberInfo pInfo = GetMemberInfo<TSource, TKey>(keySelector);
+            string param = context.Index.FieldNameTranslator.GetIndexFieldName(pInfo);
             var extendedQuery = ExtendNativeQuery((IHasNativeQuery)source, groupLimit, param, includSpellChecking, op, text, boostFields);
             return linqToSolr.Execute<ExtendedSearchResults<TSource>>(extendedQuery);
         }
@@ -330,6 +310,32 @@ namespace JCore.SitecoreModules.SolrSearchExtensions.Search.Solr
             }
             return new ExtendedCompositeQuery(query.Query, query.Filter, query.Methods, query.VirtualFieldProcessors, query.FacetQueries,
                     options, localParams);
+        }
+
+        private static MemberInfo GetMemberInfo<TSource, TKey>(Expression<Func<TSource, TKey>> propertyLambda)
+        {
+            Type type = typeof(TSource);
+
+            MemberExpression member = propertyLambda.Body as MemberExpression;
+            if (member == null)
+                throw new ArgumentException(string.Format(
+                    "Expression '{0}' refers to a method, not a property.",
+                    propertyLambda.ToString()));
+
+            MemberInfo propInfo = member.Member as MemberInfo;
+            if (propInfo == null)
+                throw new ArgumentException(string.Format(
+                    "Expression '{0}' refers to a field, not a property.",
+                    propertyLambda.ToString()));
+
+            if (type != propInfo.ReflectedType &&
+                !type.IsSubclassOf(propInfo.ReflectedType))
+                throw new ArgumentException(string.Format(
+                    "Expresion '{0}' refers to a property that is not from type {1}.",
+                    propertyLambda.ToString(),
+                    type));
+
+            return propInfo;
         }
     }
 
